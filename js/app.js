@@ -1,12 +1,11 @@
 /**
  * app.js
- * Homepage controller: loads the tutorial index, renders the scalable
+ * Homepage controller: loads tutorials from Supabase, renders the scalable
  * card-grid landing (with topic + level filters), and wires the navbar
  * search so typing filters cards live (search also matches tags).
  */
 
 import {
-  fetchJson,
   fetchText,
   calculateReadingTime,
   getQueryParam,
@@ -39,10 +38,23 @@ async function init() {
   bindNavLinks();
 
   try {
-    const index = await fetchJson("data/tutorials.json");
+    // Load tutorial metadata from Supabase
+    const { data: index, error } = await window.supabaseClient
+      .from("tutorials")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!index || index.length === 0) {
+      throw new Error("No tutorials found in Supabase.");
+    }
+
     state.tutorials = await enrichWithReadingTime(index);
     search.setIndex(state.tutorials);
-    renderFilters(index);
+    renderFilters(state.tutorials);
     renderGrid(state.tutorials);
     initReveal();
     scrollToCategory(getQueryParam("category"));
@@ -143,6 +155,7 @@ function chipGroup(label, items, key, activeValue) {
       `;
     })
     .join("");
+
   return `
     <div class="chip-group" role="group" aria-label="${label}">
       ${buttons}
@@ -155,7 +168,10 @@ function updateChipStates() {
     if (chip.dataset.category) {
       chip.classList.toggle("active", chip.dataset.category === state.category);
     } else {
-      chip.classList.toggle("active", chip.dataset.difficulty === state.difficulty);
+      chip.classList.toggle(
+        "active",
+        chip.dataset.difficulty === state.difficulty
+      );
     }
   });
 }
@@ -164,7 +180,9 @@ function clearFilters() {
   state.query = "";
   state.category = "all";
   state.difficulty = "all";
+
   if (search.input) search.input.value = "";
+
   updateChipStates();
   applyFilters();
 }
@@ -172,16 +190,24 @@ function clearFilters() {
 /** Scroll offset for cross-page deep links (?category=). */
 function scrollToCategory(category) {
   if (!category) return;
+
   const target = document.getElementById("tutorial-grid");
-  const anchor = document.querySelector(`#path-filters [data-category="${CSS.escape(category)}"]`);
+  const anchor = document.querySelector(
+    `#path-filters [data-category="${CSS.escape(category)}"]`
+  );
+
   if (anchor) {
     anchor.classList.add("active");
     state.category = category;
     updateChipStates();
     applyFilters();
   }
+
   if (target) {
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    target.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   }
 }
 
@@ -199,7 +225,9 @@ function renderCard(tutorial, index) {
     tutorial.difficulty,
     tutorial.readingTime ? `${tutorial.readingTime} min` : null,
   ].filter(Boolean);
+
   const delay = Math.min(index * 60, 480);
+
   return `
     <article
       class="tutorial-card"
@@ -235,23 +263,34 @@ function applyFilters() {
   const query = state.query;
   const category = state.category;
   const difficulty = state.difficulty;
+
   const hasFilters =
     query !== "" || category !== "all" || difficulty !== "all";
+
   let matchCount = 0;
 
   grid.querySelectorAll(".tutorial-card").forEach((card) => {
-    const matchesQuery = !query || card.dataset.searchable.includes(query);
-    const matchesCategory = category === "all" || card.dataset.category === category;
+    const matchesQuery =
+      !query || card.dataset.searchable.includes(query);
+
+    const matchesCategory =
+      category === "all" || card.dataset.category === category;
+
     const matchesDifficulty =
       difficulty === "all" || card.dataset.difficulty === difficulty;
-    const matches = matchesQuery && matchesCategory && matchesDifficulty;
+
+    const matches =
+      matchesQuery && matchesCategory && matchesDifficulty;
+
     card.hidden = !matches;
+
     if (matches) matchCount++;
   });
 
-  resultsEl.textContent = hasFilters || matchCount !== state.tutorials.length
-    ? `${matchCount} tutorial${matchCount === 1 ? "" : "s"}`
-    : "";
+  resultsEl.textContent =
+    hasFilters || matchCount !== state.tutorials.length
+      ? `${matchCount} tutorial${matchCount === 1 ? "" : "s"}`
+      : "";
 
   if (matchCount === 0 && state.tutorials.length > 0) {
     ensureEmptyState();
@@ -262,6 +301,7 @@ function applyFilters() {
 
 function ensureEmptyState() {
   document.getElementById("empty-state")?.remove();
+
   grid.insertAdjacentHTML(
     "beforeend",
     `<div class="empty-state" id="empty-state">
@@ -270,7 +310,10 @@ function ensureEmptyState() {
       <button type="button" class="empty-reset" id="empty-reset">Clear filters</button>
     </div>`
   );
-  document.getElementById("empty-reset")?.addEventListener("click", clearFilters);
+
+  document
+    .getElementById("empty-reset")
+    ?.addEventListener("click", clearFilters);
 }
 
 /* --------------------------------------------------------------------- */
@@ -282,5 +325,6 @@ function renderError(err) {
     <h3>Couldn't load tutorials</h3>
     <p>${escapeHtml(err.message)}</p>
   </div>`;
+
   console.error(err);
 }

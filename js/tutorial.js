@@ -7,15 +7,25 @@
  */
 
 import {
-  fetchJson,
   fetchText,
   getQueryParam,
   calculateReadingTime,
   formatDate,
   escapeHtml,
 } from "./utils.js";
-import { renderMarkdown, initCopyButtons, initCodeTabs, initMermaid } from "./markdown.js";
-import { buildSidebar, initSidebarDrawer } from "./sidebar.js";
+
+import {
+  renderMarkdown,
+  initCopyButtons,
+  initCodeTabs,
+  initMermaid,
+} from "./markdown.js";
+
+import {
+  buildSidebar,
+  initSidebarDrawer,
+} from "./sidebar.js";
+
 import { createSearch } from "./search.js";
 
 const contentEl = document.getElementById("markdown-content");
@@ -45,7 +55,20 @@ async function init() {
   }
 
   try {
-    const index = await fetchJson("data/tutorials.json");
+    // Load tutorial metadata from Supabase
+    const { data: index, error } = await window.supabaseClient
+      .from("tutorials")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!index || index.length === 0) {
+      throw new Error("No tutorials found in Supabase.");
+    }
+
     const currentIndex = index.findIndex((t) => t.id === id);
     const tutorial = index[currentIndex];
 
@@ -59,7 +82,9 @@ async function init() {
     search.setIndex(index);
     buildSidebar(sidebarEl, index, tutorial.id);
 
+    // Markdown files are still loaded from the existing tutorials/ folder
     const markdownText = await fetchText(tutorial.file);
+
     renderHeader(tutorial, markdownText);
     renderArticle(markdownText);
     buildTableOfContents();
@@ -77,7 +102,11 @@ async function init() {
 }
 
 function renderHeader(tutorial, markdownText) {
-  const wordCount = markdownText.trim().split(/\s+/).filter(Boolean).length;
+  const wordCount = markdownText
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+
   const readingTime = calculateReadingTime(markdownText);
 
   breadcrumbEl.innerHTML = `
@@ -85,14 +114,23 @@ function renderHeader(tutorial, markdownText) {
     / <a href="index.html?category=${encodeURIComponent(tutorial.category)}">${escapeHtml(tutorial.category)}</a>
     / <span class="accent">${escapeHtml(tutorial.title)}</span>
   `;
+
   titleEl.textContent = tutorial.title;
 
   metaRowEl.innerHTML = `
     <span class="meta-chip">${clockIconSvg()} ${readingTime} min read</span>
     <span class="meta-chip">${escapeHtml(tutorial.difficulty)}</span>
     <span class="meta-chip">${wordCount.toLocaleString()} words</span>
-    ${tutorial.subtopic ? `<span class="meta-chip subtopic-chip">${escapeHtml(tutorial.subtopic)}</span>` : ""}
-    ${tutorial.updated ? `<span class="meta-chip">Updated ${formatDate(tutorial.updated)}</span>` : ""}
+    ${
+      tutorial.subtopic
+        ? `<span class="meta-chip subtopic-chip">${escapeHtml(tutorial.subtopic)}</span>`
+        : ""
+    }
+    ${
+      tutorial.updated
+        ? `<span class="meta-chip">Updated ${formatDate(tutorial.updated)}</span>`
+        : ""
+    }
   `;
 
   feedbackWidget.hidden = false;
@@ -110,16 +148,21 @@ function initReadingProgress() {
   const update = () => {
     const scrollable = document.documentElement;
     const max = scrollable.scrollHeight - window.innerHeight;
-    const ratio = max > 0 ? Math.min(1, window.scrollY / max) : 0;
+    const ratio =
+      max > 0 ? Math.min(1, window.scrollY / max) : 0;
+
     progressBar.style.width = `${ratio * 100}%`;
   };
 
   let ticking = false;
+
   window.addEventListener(
     "scroll",
     () => {
       if (ticking) return;
+
       ticking = true;
+
       requestAnimationFrame(() => {
         update();
         ticking = false;
@@ -127,7 +170,9 @@ function initReadingProgress() {
     },
     { passive: true }
   );
+
   window.addEventListener("resize", update, { passive: true });
+
   update();
 }
 
@@ -137,7 +182,11 @@ function initReadingProgress() {
 
 function renderRelated(index, current) {
   const related = index
-    .filter((t) => t.category === current.category && t.id !== current.id)
+    .filter(
+      (t) =>
+        t.category === current.category &&
+        t.id !== current.id
+    )
     .slice(0, 3);
 
   if (related.length === 0) {
@@ -146,18 +195,33 @@ function renderRelated(index, current) {
   }
 
   relatedSection.hidden = false;
+
   relatedSection.innerHTML = `
     <h2 class="related-title">More in ${escapeHtml(current.category)}</h2>
     <div class="related-grid">
       ${related
         .map(
           (tutorial) => `
-            <a class="related-card" href="tutorial.html?id=${encodeURIComponent(tutorial.id)}">
-              <span class="related-card-title">${escapeHtml(tutorial.title)}</span>
-              <span class="related-card-desc">${escapeHtml(tutorial.description)}</span>
+            <a
+              class="related-card"
+              href="tutorial.html?id=${encodeURIComponent(tutorial.id)}"
+            >
+              <span class="related-card-title">
+                ${escapeHtml(tutorial.title)}
+              </span>
+
+              <span class="related-card-desc">
+                ${escapeHtml(tutorial.description)}
+              </span>
+
               <span class="related-card-meta">
                 <span>${escapeHtml(tutorial.difficulty)}</span>
-                ${tutorial.updated ? `<span>Updated ${formatDate(tutorial.updated)}</span>` : ""}
+
+                ${
+                  tutorial.updated
+                    ? `<span>Updated ${formatDate(tutorial.updated)}</span>`
+                    : ""
+                }
               </span>
             </a>
           `
@@ -174,8 +238,12 @@ function initFeedback(tutorialId) {
   buttons.forEach((button) => {
     button.addEventListener("click", () => {
       feedbackWidget.classList.add("voted");
+
       try {
-        localStorage.setItem(storageKey, button.dataset.vote);
+        localStorage.setItem(
+          storageKey,
+          button.dataset.vote
+        );
       } catch {
         /* storage unavailable — vote just won't persist */
       }
@@ -205,8 +273,21 @@ function buildTableOfContents() {
 
   const items = Array.from(headings)
     .map((heading) => {
-      const level = heading.tagName === "H3" ? "level-3" : "level-2";
-      return `<li class="${level}"><a href="#${heading.id}" data-target="${heading.id}">${heading.textContent}</a></li>`;
+      const level =
+        heading.tagName === "H3"
+          ? "level-3"
+          : "level-2";
+
+      return `
+        <li class="${level}">
+          <a
+            href="#${heading.id}"
+            data-target="${heading.id}"
+          >
+            ${heading.textContent}
+          </a>
+        </li>
+      `;
     })
     .join("");
 
@@ -219,6 +300,7 @@ function buildTableOfContents() {
 /** Highlight the TOC entry for whichever heading is currently in view. */
 function observeActiveSection() {
   const links = tocEl.querySelectorAll(".toc-list a");
+
   if (links.length === 0) return;
 
   const headings = contentEl.querySelectorAll("h2, h3");
@@ -227,15 +309,27 @@ function observeActiveSection() {
     (entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
-        links.forEach((link) => link.classList.remove("active"));
-        const activeLink = tocEl.querySelector(`a[data-target="${entry.target.id}"]`);
+
+        links.forEach((link) =>
+          link.classList.remove("active")
+        );
+
+        const activeLink = tocEl.querySelector(
+          `a[data-target="${entry.target.id}"]`
+        );
+
         activeLink?.classList.add("active");
       });
     },
-    { rootMargin: "-15% 0px -75% 0px", threshold: 0 }
+    {
+      rootMargin: "-15% 0px -75% 0px",
+      threshold: 0,
+    }
   );
 
-  headings.forEach((heading) => observer.observe(heading));
+  headings.forEach((heading) =>
+    observer.observe(heading)
+  );
 }
 
 /* --------------------------------------------------------------------- */
@@ -249,19 +343,44 @@ function renderPagination(index, currentIndex) {
   paginationEl.innerHTML = `
     ${
       prev
-        ? `<a class="pagination-link prev" href="tutorial.html?id=${encodeURIComponent(prev.id)}">
-            <span class="pagination-direction">← Previous</span>
-            <span class="pagination-title">${escapeHtml(prev.title)}</span>
-          </a>`
-        : `<span class="pagination-link pagination-placeholder"></span>`
+        ? `
+          <a
+            class="pagination-link prev"
+            href="tutorial.html?id=${encodeURIComponent(prev.id)}"
+          >
+            <span class="pagination-direction">
+              ← Previous
+            </span>
+
+            <span class="pagination-title">
+              ${escapeHtml(prev.title)}
+            </span>
+          </a>
+        `
+        : `
+          <span class="pagination-link pagination-placeholder"></span>
+        `
     }
+
     ${
       next
-        ? `<a class="pagination-link next" href="tutorial.html?id=${encodeURIComponent(next.id)}">
-            <span class="pagination-direction">Next →</span>
-            <span class="pagination-title">${escapeHtml(next.title)}</span>
-          </a>`
-        : `<span class="pagination-link pagination-placeholder"></span>`
+        ? `
+          <a
+            class="pagination-link next"
+            href="tutorial.html?id=${encodeURIComponent(next.id)}"
+          >
+            <span class="pagination-direction">
+              Next →
+            </span>
+
+            <span class="pagination-title">
+              ${escapeHtml(next.title)}
+            </span>
+          </a>
+        `
+        : `
+          <span class="pagination-link pagination-placeholder"></span>
+        `
     }
   `;
 }
@@ -272,21 +391,46 @@ function renderPagination(index, currentIndex) {
 
 function renderMissing(message) {
   titleEl.textContent = "Tutorial not found";
+
   breadcrumbEl.textContent = "Docs";
+
   metaRowEl.innerHTML = "";
+
   tocEl.innerHTML = "";
+
   contentEl.innerHTML = `
     <div class="empty-state">
       <h3>We couldn't load that tutorial</h3>
+
       <p>${escapeHtml(message)}</p>
-      <p><a href="index.html" style="color: var(--color-accent);">← Back to all tutorials</a></p>
+
+      <p>
+        <a
+          href="index.html"
+          style="color: var(--color-accent);"
+        >
+          ← Back to all tutorials
+        </a>
+      </p>
     </div>
   `;
 }
 
 function clockIconSvg() {
-  return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:-2px;">
-    <circle cx="8" cy="8" r="6.25"/>
-    <path d="M8 4.5V8l2.5 1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
+  return `
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      style="width:14px;height:14px;vertical-align:-2px;"
+    >
+      <circle cx="8" cy="8" r="6.25"/>
+      <path
+        d="M8 4.5V8l2.5 1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  `;
 }
